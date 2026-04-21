@@ -1,0 +1,51 @@
+# config.yaml
+main_folder: "/home/hampthamanta/code/magisterka"
+datasets:
+  ycb: "/BlenderProc/resources/ycb/models/ycb"
+  blenderkit: "/BlenderProc/resources/BlenderKit_models/scenes"
+  pix3d: "/BlenderProc/resources/pix3d/model/"
+  hdri: "/BlenderProc/resources/hdri/"
+  handal: "/BlenderProc/resourceshandal/models"
+  hope: "/BlenderProc/resources/hope/models"
+  ruapc: "/BlenderProc/resources/ruapc/models"
+  tless: "/BlenderProc/resources/tless_models/models_cad"
+  
+output: "/dataset_generator/output/"
+
+settings:
+  obj_freq: # 0.0 - 1.0
+    ycb: 0.5
+    pix3d: 0.01
+    handal: 0.5
+    hope: 0.5
+    ruapc: 0.5
+    tless: 0.5
+  scene_sources:
+    scenenet: false
+    blenderkit: true
+  blenderkit_weight: 1  # multiplier for BlenderKit scene selection chance
+  resolution_RGB: [1920, 1080]  # Remainder of camera resollution
+
+  # Camera angle perturbation (augmentation)
+  camera_perturbation:
+    probability: 0.25       # chance of applying perturbation per pose
+    pitch_range: [-45, 30] # degrees, up/down tilt
+    roll_range: [-25, 25]  # degrees, sideways tilt
+
+  # Minimum visible objects constraint
+  camera_proximity:
+    min_objects: 3         # min distinct objects (not walls/floors) in view
+    min_dist: 0.25          # meters minimum distance
+    max_dist: 2.5          # meters maximum distance
+    max_attempts: 400      # max number of camera pose sampling attempts
+
+  # Camera sampling parameters (ray-casting, positioning, constraints)
+  camera_sampling:
+    # Camera positioning in scene
+    margin_normal: 0.15              # distance from walls (normal mode, 15%)
+    margin_force_accept: 0.05        # distance from walls (force_accept mode, 5%)
+    
+    # Camera height constraints (relative to room height)
+    cam_z_min_percent: 0.10          # camera min height = floor + room_height * this
+    cam_z_max_percent: 0.75          # camera max height = floor + room_height * this
+    max_background_dist_m: 2000.0       # steer look-at sampling toward scene content within this distance
