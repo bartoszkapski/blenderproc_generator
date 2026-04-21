@@ -52,7 +52,7 @@ from part_render import (
     sample_camera_poses,
     setup_cameras,
 )
-from part_scenes import choose_and_load_scene, load_objects_into_scene, place_objects_on_surfaces
+from part_scenes import choose_and_load_scene, load_objects_into_scene, place_objects_in_xy_bounds
 
 VERSION = "1.3 - Fixed Depth duplication"
 print(f"\n[BOOT] {__file__} | Version: {VERSION}")
@@ -126,7 +126,7 @@ def run_single_repeat(cfg: dict, cam_params: dict, repeat_idx: int,
     loaded_objects = load_objects_into_scene(datasets, cfg["settings"])
 
     if loaded_objects:
-        place_objects_on_surfaces(scene_objs, loaded_objects)
+        place_objects_in_xy_bounds(scene_objs, loaded_objects)
 
     # Upuszczenie obiektow na powierzchnie (raycast)
     if physics and loaded_objects:

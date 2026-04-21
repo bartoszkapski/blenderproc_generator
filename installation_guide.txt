@@ -8,6 +8,11 @@
 !pip install -e .
 blenderproc quickstart
 
+# 1.1
+# BlenderKit module (not necessary)
+download .zip from https://www.blenderkit.com/get-blenderkit/
+drag & drop into open blender and accept
+
 
 # 2
 cd ..

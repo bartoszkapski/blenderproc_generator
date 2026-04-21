@@ -209,21 +209,117 @@ def load_objects_into_scene(datasets: dict, cfg_settings: dict) -> list:
 	return loaded_objects
 
 
+def place_objects_in_xy_bounds(scene_objs: list, loaded_objects: list):
+	"""Rozmieszcza obiekty wewnatrz czworokata XY sceny w trzech poziomach wysokosci.
+	
+	Proporcje: 50% na 10-25% wysokości, 35% na 26-50%, 15% na 51-75% sceny.
+	"""
+	if not loaded_objects:
+		return
+
+	# Wyznaczenie bounding box sceny na XY
+	bb_list = []
+	for obj in scene_objs:
+		try:
+			bb_list.append(np.array(obj.get_bound_box()))
+		except Exception:
+			pass
+
+	if not bb_list:
+		print("[WARN] Could not compute scene bounding box for XY bounds placement")
+		return
+
+	# Połączenie wszystkich bounding boxów
+	all_bb = np.concatenate(bb_list, axis=0)
+	bb_min_xy = all_bb[:, :2].min(axis=0)
+	bb_max_xy = all_bb[:, :2].max(axis=0)
+	
+	# Wysokość sceny
+	bb_min_z = all_bb[:, 2].min()
+	bb_max_z = all_bb[:, 2].max()
+	scene_height = bb_max_z - bb_min_z
+
+	# Zmniejszenie o 10% od krawędzi
+	xy_range = bb_max_xy - bb_min_xy
+	xy_margin = xy_range * 0.1
+	x_min = bb_min_xy[0] + xy_margin[0]
+	x_max = bb_max_xy[0] - xy_margin[0]
+	y_min = bb_min_xy[1] + xy_margin[1]
+	y_max = bb_max_xy[1] - xy_margin[1]
+
+	# Podzielenie obiektów na 3 grupy wg proporcji
+	total = len(loaded_objects)
+	n_low = int(total * 0.50)
+	n_mid = int((total - n_low) * (35.0 / 50.0))
+	n_high = total - n_low - n_mid
+
+	group_low = loaded_objects[:n_low]
+	group_mid = loaded_objects[n_low:n_low + n_mid]
+	group_high = loaded_objects[n_low + n_mid:]
+
+	print(f"[INFO] XY bounds placement: {n_low} low (10-25%), {n_mid} mid (26-50%), {n_high} high (51-75%)")
+
+	# Rozmieszczenie grupy niskiej (10-25% wysokości sceny)
+	z_low_min = bb_min_z + scene_height * 0.10
+	z_low_max = bb_min_z + scene_height * 0.25
+	for obj in group_low:
+		try:
+			obj_bb = np.array(obj.get_bound_box())
+			obj_height = (obj_bb.max(axis=0) - obj_bb.min(axis=0))[2]
+		except Exception:
+			obj_height = 0.1
+
+		x = random.uniform(x_min, x_max)
+		y = random.uniform(y_min, y_max)
+		z = random.uniform(z_low_min, z_low_max - obj_height * 0.5)
+
+		obj.set_location([x, y, z])
+		obj.set_rotation_euler([0, 0, random.uniform(0, 2 * math.pi)])
+
+	# Rozmieszczenie grupy środkowej (26-50% wysokości sceny)
+	z_mid_min = bb_min_z + scene_height * 0.26
+	z_mid_max = bb_min_z + scene_height * 0.50
+	for obj in group_mid:
+		try:
+			obj_bb = np.array(obj.get_bound_box())
+			obj_height = (obj_bb.max(axis=0) - obj_bb.min(axis=0))[2]
+		except Exception:
+			obj_height = 0.1
+
+		x = random.uniform(x_min, x_max)
+		y = random.uniform(y_min, y_max)
+		z = random.uniform(z_mid_min, z_mid_max - obj_height * 0.5)
+
+		obj.set_location([x, y, z])
+		obj.set_rotation_euler([0, 0, random.uniform(0, 2 * math.pi)])
+
+	# Rozmieszczenie grupy wysokiej (51-75% wysokości sceny)
+	z_high_min = bb_min_z + scene_height * 0.51
+	z_high_max = bb_min_z + scene_height * 0.75
+	for obj in group_high:
+		try:
+			obj_bb = np.array(obj.get_bound_box())
+			obj_height = (obj_bb.max(axis=0) - obj_bb.min(axis=0))[2]
+		except Exception:
+			obj_height = 0.1
+
+		x = random.uniform(x_min, x_max)
+		y = random.uniform(y_min, y_max)
+		z = random.uniform(z_high_min, z_high_max - obj_height * 0.5)
+
+		obj.set_location([x, y, z])
+		obj.set_rotation_euler([0, 0, random.uniform(0, 2 * math.pi)])
+
+	print(f"[INFO] Placed {len(loaded_objects)} objects in XY bounds at 3 height levels")
+
+
 def place_objects_on_surfaces(scene_objs: list, loaded_objects: list):
-	"""Rozmieszcza obiekty metoda smart placement i random-drop."""
+	"""Rozmieszcza obiekty metoda XY bounds z wyroznionymi poziomami wysokosci."""
 	if not loaded_objects:
 		return
 
 	random.shuffle(loaded_objects)
-	n_smart = max(1, len(loaded_objects) // 2)
-	smart_objects = loaded_objects[:n_smart]
-	drop_objects = loaded_objects[n_smart:]
-
-	print(f"[INFO] Object placement split: {len(smart_objects)} smart, {len(drop_objects)} random-drop")
-
-	_place_objects_smart(scene_objs, smart_objects)
-	if drop_objects:
-		_place_objects_random_drop(scene_objs, drop_objects)
+	place_objects_in_xy_bounds(scene_objs, loaded_objects)
 
 
 def _place_objects_random_drop(scene_objs: list, drop_objects: list, z_offset_m: float = 0.2, n_exclude_top: int = 8):
