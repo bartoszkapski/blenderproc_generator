@@ -1,0 +1,7 @@
+BlenderProc/
+dataset_generator/examples/
+dataset_generator/output/
+dataset_generator/__pycache__/
+dataset_generator/generate_data_PUT.py
+dataset_generator/generate_data_PUT_org.py
+dataset_generator/orchestrator.py

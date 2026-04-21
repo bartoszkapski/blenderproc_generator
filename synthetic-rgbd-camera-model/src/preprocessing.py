@@ -1,0 +1,313 @@
+import numpy as np
+import cv2
+from scipy.ndimage import map_coordinates, gaussian_filter
+from src.projection import filter_depth_with_local_min_scipy
+
+
+class PreprocessingManager:
+    def __init__(self, params: dict):
+        self.rgb_params = params["rgb"]
+        self.depth_params = params["depth"]
+        self.T = params["T"]
+
+    def _add_lateral_noise_remap(self, Z: np.ndarray, fx, px, cx, cy, max_delta=0.03):
+        """Simulate lateral displacement noise by remapping pixels.
+
+        Args:
+            Z (np.ndarray): Depth map in meters.
+            fx (float): Focal length in pixels.
+            px (float): Pixel size.
+            cx (float): Principal point x-coordinate.
+            cy (float): Principal point y-coordinate.
+            max_delta (float): Max allowed per-pixel depth change (m).
+
+        Returns:
+            np.ndarray: Depth map with lateral noise applied.
+        """
+        H, W = Z.shape
+        i, j = np.indices((H, W))
+        r = np.sqrt((i - cy) ** 2 + (j - cx) ** 2) * px
+        theta = np.arctan(r / fx)
+        sigma_px = 0.8 + 0.035 * (theta / (np.pi / 2 - theta))
+        dx = np.random.randn(H, W) * sigma_px
+        dy = np.random.randn(H, W) * sigma_px
+        coords = np.stack([i + dy, j + dx], axis=0)
+        Z_noisy = map_coordinates(Z, coords, order=1, mode="nearest")
+        diff = np.abs(Z_noisy - Z)
+        Z_noisy[diff > max_delta] = Z[diff > max_delta]
+        return Z_noisy
+
+    def _add_axial_noise(self, Z: np.ndarray, fx, px, cx, cy):
+        """Add depth-dependent axial noise to simulate sensor error.
+
+        Args:
+            Z (np.ndarray): Depth map in meters.
+            fx, px, cx, cy (float): Camera intrinsics.
+
+        Returns:
+            np.ndarray: Depth map with axial noise added.
+        """
+        H, W = Z.shape
+        i, j = np.indices((H, W))
+
+        r = np.sqrt((i - cy) ** 2 + (j - cx) ** 2) * px
+        theta = np.arctan(r / fx)
+
+        base = 0.0012 + 0.0019 * (Z - 0.4) ** 2
+        hyperb = (
+            (0.0001 / np.sqrt(np.clip(Z, 1e-6, None)))
+            * (theta**2)
+            / ((np.pi / 2 - theta) ** 2)
+        )
+        sigma_z = base + hyperb
+
+        noise = np.random.randn(H, W) * sigma_z
+        return Z + noise
+
+    def _compute_drop_prob_from_angle(
+        self,
+        depth,
+        smoothing_sigma=1.0,
+        theta0_deg=75.0,
+        theta_min_deg=60.0,
+        seed=None,
+    ):
+        """Compute per-pixel drop probability based on surface angle.
+
+        Args:
+            depth (np.ndarray): Depth map (m).
+            smoothing_sigma (float): Gaussian blur sigma.
+            theta0_deg (float): Max incidence angle for drop ramp.
+            theta_min_deg (float): Minimum angle for drop ramp
+            seed (int, optional): RNG seed.
+
+        Returns:
+            tuple:
+                - p_drop (np.ndarray): Drop probability [0,1].
+                - theta (np.ndarray): Local incidence angle (rad).
+        """
+        if seed is not None:
+            np.random.seed(seed)
+
+        h, w = depth.shape
+
+        depth_s = gaussian_filter(depth, sigma=smoothing_sigma)
+        dzdx = (np.roll(depth_s, -1, axis=1) - np.roll(depth_s, 1, axis=1)) * 0.5
+        dzdy = (np.roll(depth_s, -1, axis=0) - np.roll(depth_s, 1, axis=0)) * 0.5
+        Nx = -dzdx * self.depth_params["fx"]
+        Ny = -dzdy * self.depth_params["fy"]
+        Nz = np.ones_like(depth_s)
+        N = np.stack((Nx, Ny, Nz), axis=-1)
+        N /= np.linalg.norm(N, axis=2, keepdims=True) + 1e-8
+
+        u = np.arange(w)
+        v = np.arange(h)[:, None]
+        X = (u - self.depth_params["cx"]) * depth / self.depth_params["fx"]
+        Y = (v - self.depth_params["cy"]) * depth / self.depth_params["fy"]
+        P = np.stack((X, Y, depth), axis=-1)
+        D = P / (np.linalg.norm(P, axis=2, keepdims=True) + 1e-8)
+
+        cos_t = N[:, :, 2]
+        theta = np.arccos(cos_t)
+
+        def p_drop_quad_thresh(theta, theta0_deg, theta_min_deg):
+
+            theta0 = np.deg2rad(theta0_deg)
+            theta_min = np.deg2rad(theta_min_deg)
+            ramp = (theta - theta_min) / (theta0 - theta_min)
+            p = np.clip(ramp**2, 0.0, 1.0)
+            p = np.where(theta < theta_min, 0.0, p)
+            return p
+
+        p_drop = p_drop_quad_thresh(theta, theta0_deg, theta_min_deg)
+        p_drop[abs(theta - 90) < 4.0] = 0.0
+        return p_drop, theta
+
+    def _compute_drop_prob_from_color(
+        self,
+        depth_img: np.ndarray,
+        rgb_img: np.ndarray,
+        theta: np.ndarray,
+        cutoff_v: float = 0.2,
+        angle_thresh: float = 50.0,
+        angle_exponent: float = 2.0,
+        max_prob: float = 0.65,
+    ):
+        """Compute additional drop probability based on surface brightness.
+
+        Darker/steep regions are more likely to drop.
+
+        Args:
+            depth_img (np.ndarray): Depth in raw units.
+            rgb_img (np.ndarray): RGB image (HxWx3).
+            theta (np.ndarray): Incidence angles from `_compute_drop_prob_from_angle`.
+            cutoff_v (float): Brightness cutoff.
+            angle_thresh (float): Angle threshold in degrees.
+            angle_exponent (float): Exponent for angle weighting.
+            max_prob (float): Max drop probability factor.
+
+        Returns:
+            np.ndarray: Per-pixel drop probability [0,1].
+        """
+        hsv = cv2.cvtColor(rgb_img, cv2.COLOR_RGB2HSV)
+        v = hsv[..., 2] / 255.0
+
+        def p_brightness(v):
+            return max_prob * np.exp(-v / cutoff_v)
+
+        angle_thresh_rad = np.deg2rad(angle_thresh)
+
+        def w_angle(theta):
+            ramp = (theta / angle_thresh_rad) ** angle_exponent
+            return np.clip(ramp, 0.0, 1.0)
+
+        drop_prob = (p_brightness(v) * w_angle(theta)).astype(np.float32)
+        return drop_prob
+
+    def _drop_pixels(self, depth_img: np.ndarray, rgb_img: np.ndarray):
+        """Randomly drop pixels according to combined angle+color probabilities.
+
+        Args:
+            depth_img (np.ndarray): Depth in meters.
+            rgb_img (np.ndarray): RGB image.
+
+        Returns:
+            np.ndarray: Depth map with dropped pixels set to NaN.
+        """
+        p_drop_angle, theta = self._compute_drop_prob_from_angle(depth_img)
+        p_drop_color = self._compute_drop_prob_from_color(depth_img, rgb_img, theta)
+        h, w = depth_img.shape
+        p_drop = p_drop_angle + p_drop_color
+
+        u_rand = np.random.rand(h, w)
+        mask_drop = u_rand < p_drop
+
+        depth_out = depth_img.copy()
+        depth_out[mask_drop] = np.nan
+        return depth_out
+
+    def get_processed_image(self, depth_img: np.ndarray, rgb_img: np.ndarray):
+        """Full noise & occlusion simulation pipeline for depth.
+
+        1. Compute drop mask → NaNs for occlusion.
+        2. Add lateral and axial noise.
+        3. Quantize back to uint16 and save preview.
+
+        Args:
+            depth_img (np.ndarray): Raw depth (uint16 mm or float32 m).
+            rgb_img (np.ndarray): Corresponding RGB image.
+
+        Returns:
+            np.ndarray: Processed depth image as uint16 (mm).
+        """
+        Z_img = depth_img
+        colored_depth = self._get_colors_for_depth(depth_img, rgb_img)
+        fx, fy = self.depth_params["fx"], self.depth_params["fy"]
+        cx, cy = (
+            self.depth_params["cx"],
+            self.depth_params["cy"],
+        )
+        px = self.depth_params["px"]
+
+        if Z_img.dtype == np.uint16:
+            Z = Z_img.astype(np.float32) / 1000.0  # mm -> m
+        else:
+            Z = Z_img.astype(np.float32)  # expected to be meters
+
+        Z[Z == 65.535] = 0.0
+
+        Z_angles = self._drop_pixels(Z, colored_depth)
+
+        Z_noisy = self._add_lateral_noise_remap(Z_angles, fx, px, cx, cy)
+        Z_final = self._add_axial_noise(Z_noisy, fx, px, cx, cy)
+
+        Zmm = np.where(np.isnan(Z_final), 0.0, Z_final)
+        Zmm2 = np.clip(Zmm * 1000.0, 0, 65535).astype(np.uint16)
+
+        return Zmm2
+
+    def _get_colors_for_depth(
+        self, depth_img: np.ndarray, rgb_img: np.ndarray, depth_scale=1000.0
+    ):
+        """Project RGB colors into depth resolution for drop modeling.
+
+        Uses equisolid fisheye back-projection (matching Blender's
+        FISHEYE_EQUISOLID camera) to map depth pixels → 3D → RGB pixels.
+
+        Args:
+            depth_img (np.ndarray): Depth array in raw units.
+            rgb_img (np.ndarray): RGB image at full resolution.
+            depth_scale (float): Scale factor from raw units to meters.
+
+        Returns:
+            np.ndarray: HxWx3 color image aligned with depth pixels.
+        """
+        H_d, W_d = depth_img.shape
+        H_r, W_r = rgb_img.shape[:2]
+        K_rgb = np.array(
+            [
+                [self.rgb_params["fx"], 0, self.rgb_params["cx"]],
+                [0, self.rgb_params["fy"], self.rgb_params["cy"]],
+                [0, 0, 1],
+            ]
+        )
+        K_depth = np.array(
+            [
+                [self.depth_params["fx"], 0, self.depth_params["cx"]],
+                [0, self.depth_params["fy"], self.depth_params["cy"]],
+                [0, 0, 1],
+            ]
+        )
+
+        rgb_resized = cv2.resize(rgb_img, (W_d, H_d), interpolation=cv2.INTER_LINEAR)
+        scale_x, scale_y = W_d / W_r, H_d / H_r
+        Kd = K_depth
+        Kr = K_rgb.copy()
+        Kr[0, 0] *= scale_x
+        Kr[0, 2] *= scale_x
+        Kr[1, 1] *= scale_y
+        Kr[1, 2] *= scale_y
+
+        out = np.zeros((H_d, W_d, 3), dtype=rgb_resized.dtype)
+        vs, us = np.where(depth_img > 0)
+        if not len(us):
+            return out
+
+        Z = depth_img[vs, us].astype(np.float32) / depth_scale
+        Z = filter_depth_with_local_min_scipy(Z, kernel_size=49)
+
+        # --- Equisolid fisheye back-projection (replaces cv2.undistortPoints) ---
+        cx_d = Kd[0, 2]
+        cy_d = Kd[1, 2]
+        px = self.depth_params["px"]            # mm per pixel
+        fx_mm = self.depth_params["fx"] * px     # focal length in mm
+
+        x_sensor = (us - cx_d) * px             # sensor position in mm
+        y_sensor = (vs - cy_d) * px
+
+        r = np.sqrt(x_sensor**2 + y_sensor**2)
+        arg = np.clip(r / (2.0 * fx_mm), -1.0, 1.0)
+        theta = 2.0 * np.arcsin(arg)
+        phi = np.arctan2(y_sensor, x_sensor)
+
+        sin_theta = np.sin(theta)
+        ray_x = sin_theta * np.cos(phi)
+        ray_y = sin_theta * np.sin(phi)
+        ray_z = np.cos(theta)
+
+        # Z here is ray distance → scale by ray to get 3D point
+        X = ray_x * Z
+        Y = ray_y * Z
+        Z_cam = ray_z * Z
+
+        ones = np.ones_like(Z_cam)
+        pts_d_h = np.stack([X, Y, Z_cam, ones], axis=1).T
+        pts_c_h = (self.T @ pts_d_h).T
+        Xc, Yc, Zc = pts_c_h[:, 0], pts_c_h[:, 1], pts_c_h[:, 2]
+
+        u_c = np.round((Kr[0, 0] * Xc / Zc) + Kr[0, 2]).astype(int)
+        v_c = np.round((Kr[1, 1] * Yc / Zc) + Kr[1, 2]).astype(int)
+
+        valid = (u_c >= 0) & (u_c < W_d) & (v_c >= 0) & (v_c < H_d) & (Zc > 0)
+        out[vs[valid], us[valid]] = rgb_resized[v_c[valid], u_c[valid]]
+        return out

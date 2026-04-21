@@ -1,0 +1,14 @@
+# Tested on Python 3.12
+
+# 1
+# BlenderProc installation
+
+!git clone https://github.com/DLR-RM/BlenderProc.git
+%cd "BlenderProc"
+!pip install -e .
+blenderproc quickstart
+
+
+# 2
+cd ..
+pip install -r requirements.txt
