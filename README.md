@@ -44,6 +44,12 @@ znajdują się tutaj:
 - generate_real_depth_thread.py - post-processing obrazów głębi
 
 ## 5 Przykładowe uruchomienie
+Przed uruchomieniem konieczne jest dostosowanie ścieżek w pliku dataset_generator/optimalized_generator/config.yaml:
+- main_folder - ścieżka do folderu, gdzie pobrano repozytorium
+- datasets - rozpakowane foldery zbioru danych scen, obiektów, tekstur
+- output - lokalizacja wyników działania generatora (main_folder/output)
+
+
 Pełne działanie generatora wraz z post-processingiem zdjęć głębi
 <pre>
 blenderproc run generate_data_v3.py --seed 42 --num_samples 5 --num_repeats 3 --config config.yaml --physics --post-process 4
