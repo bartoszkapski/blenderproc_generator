@@ -46,11 +46,11 @@ znajdują się tutaj:
 ## 5 Przykładowe uruchomienie
 Pełne działanie generatora wraz z post-processingiem zdjęć głębi
 <pre>
-blenderproc run generate_data_v3.py --seed 42 --num_samples 5 --num_repeats 3 --physics --post-process 4
+blenderproc run generate_data_v3.py --seed 42 --num_samples 5 --num_repeats 3 --config config.yaml --physics --post-process 4
 </pre>
 
 Tryb debug pozwalający na podgląd generowanych scen (nie uruchamia renderu) \
 Otworzy się okno Blendera i trzeba w nim ręcznie uruchomić skrypt przez przycisk "Run BlenderProc" bezpośrednio nad podglądem kodu
 <pre>
-blenderproc debug generate_data_v3.py --seed 42 --num_samples 1 --num_repeats 1 --debug
+blenderproc debug generate_data_v3.py --seed 42 --num_samples 1 --num_repeats 1 --config config.yaml --debug
 </pre>
