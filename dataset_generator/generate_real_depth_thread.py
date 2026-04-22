@@ -1,19 +1,13 @@
 """
-Depth Distortion Post-Processing
-=================================
-Applies realistic depth camera distortion (noise, alignment, projection)
-from the synthetic-rgbd-camera-model to depth_ground_truth images.
+Przykład uruchomienia:
+python generate_real_depth_thread.py --path ../output --config config.yaml --workers 4
 
-The "depth_perfect" output stays in the depth-camera frame. This avoids
-introducing RGB-view occlusion holes into the ideal reference depth.
+Wymagane argumenty:
+    --path <path> : ścieżka do folderu z surowymi danymi z renderu
+    --config <path> : ścieżka do pliku config.yaml
 
-Run this AFTER generate_data.py, in the venv with open3d installed:
-
-    source /home/hampthamanta/code_workspace/magisterka/venv_mgr/bin/activate
-    python generate_real_depth.py --input <output_run_dir>
-
-Or process all runs under the output directory:
-    python generate_real_depth.py --input <output_root> --recursive
+Dodatkowe argumenty:
+    --workers <int> : liczba procesów roboczych na CPU (domyślnie 1)
 """
 
 import argparse

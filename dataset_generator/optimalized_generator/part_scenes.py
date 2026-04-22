@@ -209,6 +209,55 @@ def load_objects_into_scene(datasets: dict, cfg_settings: dict) -> list:
 	return loaded_objects
 
 
+def _collect_scene_object_records(scene_objs: list) -> list:
+	"""Zbiera centrum i granice bounding boxow dla obiektow sceny."""
+	records = []
+	for obj in scene_objs:
+		try:
+			bb = np.array(obj.get_bound_box(), dtype=np.float64)
+			bb_min = bb.min(axis=0)
+			bb_max = bb.max(axis=0)
+			center = (bb_min + bb_max) * 0.5
+			records.append(
+				{
+					"obj": obj,
+					"center": center,
+					"bb_min": bb_min,
+					"bb_max": bb_max,
+				}
+			)
+		except Exception:
+			pass
+	return records
+
+
+def _count_neighbors(records: list, candidate_index: int, radius_m: float, dims: tuple[int, ...]) -> int:
+	"""Liczy, ile obiektow znajduje sie w promieniu podanym w wybranych wymiarach."""
+	candidate = records[candidate_index]["center"]
+	count = 0
+	for index, record in enumerate(records):
+		if index == candidate_index:
+			continue
+		delta = candidate[list(dims)] - record["center"][list(dims)]
+		if float(np.linalg.norm(delta)) <= radius_m:
+			count += 1
+	return count
+
+
+def _pick_supported_extreme(records: list, axis: int, mode: str, radius_m: float = 4.0, min_neighbors: int = 5, dims: tuple[int, ...] = (0, 1, 2)):
+	"""Wybiera skrajny obiekt tylko wtedy, gdy ma wystarczajace lokalne wsparcie."""
+	if not records:
+		return None
+
+	reverse = mode == "max"
+	ordered = sorted(enumerate(records), key=lambda item: item[1]["center"][axis], reverse=reverse)
+	for index, record in ordered:
+		if _count_neighbors(records, index, radius_m, dims) >= min_neighbors:
+			return record
+
+	return ordered[0][1]
+
+
 def place_objects_in_xy_bounds(scene_objs: list, loaded_objects: list):
 	"""Rozmieszcza obiekty wewnatrz czworokata XY sceny w trzech poziomach wysokosci.
 	
@@ -217,27 +266,24 @@ def place_objects_in_xy_bounds(scene_objs: list, loaded_objects: list):
 	if not loaded_objects:
 		return
 
-	# Wyznaczenie bounding box sceny na XY
-	bb_list = []
-	for obj in scene_objs:
-		try:
-			bb_list.append(np.array(obj.get_bound_box()))
-		except Exception:
-			pass
-
-	if not bb_list:
+	records = _collect_scene_object_records(scene_objs)
+	if not records:
 		print("[WARN] Could not compute scene bounding box for XY bounds placement")
 		return
 
-	# Połączenie wszystkich bounding boxów
-	all_bb = np.concatenate(bb_list, axis=0)
-	bb_min_xy = all_bb[:, :2].min(axis=0)
-	bb_max_xy = all_bb[:, :2].max(axis=0)
-	
-	# Wysokość sceny
-	bb_min_z = all_bb[:, 2].min()
-	bb_max_z = all_bb[:, 2].max()
-	scene_height = bb_max_z - bb_min_z
+	# Wyznaczenie odpornych na outliery granic sceny.
+	x_min_rec = _pick_supported_extreme(records, axis=0, mode="min", radius_m=4.0, min_neighbors=5, dims=(0, 1))
+	x_max_rec = _pick_supported_extreme(records, axis=0, mode="max", radius_m=4.0, min_neighbors=5, dims=(0, 1))
+	y_min_rec = _pick_supported_extreme(records, axis=1, mode="min", radius_m=4.0, min_neighbors=5, dims=(0, 1))
+	y_max_rec = _pick_supported_extreme(records, axis=1, mode="max", radius_m=4.0, min_neighbors=5, dims=(0, 1))
+	z_min_rec = _pick_supported_extreme(records, axis=2, mode="min", radius_m=4.0, min_neighbors=5, dims=(0, 1, 2))
+	z_max_rec = _pick_supported_extreme(records, axis=2, mode="max", radius_m=4.0, min_neighbors=5, dims=(0, 1, 2))
+
+	bb_min_xy = np.array([x_min_rec["bb_min"][0], y_min_rec["bb_min"][1]], dtype=np.float64)
+	bb_max_xy = np.array([x_max_rec["bb_max"][0], y_max_rec["bb_max"][1]], dtype=np.float64)
+	bb_min_z = float(z_min_rec["bb_min"][2])
+	bb_max_z = float(z_max_rec["bb_max"][2])
+	scene_height = max(1e-3, bb_max_z - bb_min_z)
 
 	# Zmniejszenie o 10% od krawędzi
 	xy_range = bb_max_xy - bb_min_xy
@@ -258,6 +304,10 @@ def place_objects_in_xy_bounds(scene_objs: list, loaded_objects: list):
 	group_high = loaded_objects[n_low + n_mid:]
 
 	print(f"[INFO] XY bounds placement: {n_low} low (10-25%), {n_mid} mid (26-50%), {n_high} high (51-75%)")
+	print(
+		f"[INFO] Robust bounds: X=({x_min:.2f}, {x_max:.2f}), "
+		f"Y=({y_min:.2f}, {y_max:.2f}), Z=({bb_min_z:.2f}, {bb_max_z:.2f})"
+	)
 
 	# Rozmieszczenie grupy niskiej (10-25% wysokości sceny)
 	z_low_min = bb_min_z + scene_height * 0.10

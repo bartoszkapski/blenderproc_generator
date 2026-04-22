@@ -4,7 +4,7 @@ import bpy
 
 
 """
-Przyklad uruchomienia:
+Przykład uruchomienia:
     blenderproc run  generate_data_v3.py --seed 42 --num_samples 5 --num_repeats 3
 
 Wymagane argumenty:
@@ -15,7 +15,7 @@ Wymagane argumenty:
 Dodatkowe argumenty:
     --config <path> : sciezka do config.yaml
     --hdri : zaladowanie dodatkowego HDRI do sceny
-    --physics : upuszczenie obiektow przez symulację fizyki
+    --physics : upuszczenie obiektow przez symulację fizyki (proszczona fizyka - Raycastingu)
     --post-process <num_workers> : po zakończeniu renderu uruchamia skrypt post-processingu (num_workers >= 1)
     --debug : tryb debug (buduje scenę, ale nic nie renderuje)
   
@@ -43,7 +43,7 @@ if str(SCRIPT_DIR) not in sys.path:
 if str(Path.cwd()) not in sys.path:
     sys.path.insert(0, str(Path.cwd()))
 
-from part_physics import drop_objects_raycast
+from part_physics import simulate_loaded_objects_physics
 from part_render import (
     compute_camera_params,
     configure_bproc_optix_renderer,
@@ -128,11 +128,11 @@ def run_single_repeat(cfg: dict, cam_params: dict, repeat_idx: int,
     if loaded_objects:
         place_objects_in_xy_bounds(scene_objs, loaded_objects)
 
-    # Upuszczenie obiektow na powierzchnie (raycast)
+    # Symulacja fizyki tylko dla nowo wczytanych obiektow
     if physics and loaded_objects:
-        print("[INFO] Dropping objects onto surfaces (raycast)...")
-        drop_objects_raycast(scene_objs, loaded_objects)
-        print("[INFO] Object drop complete.")
+        print("[INFO] Running rigid-body physics for loaded objects...")
+        simulate_loaded_objects_physics(scene_objs, loaded_objects)
+        print("[INFO] Physics simulation complete.")
 
     # Ustawienie kamer
     depth_cam, rgb_cam = setup_cameras(cam_params)
