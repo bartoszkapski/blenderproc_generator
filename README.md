@@ -43,13 +43,17 @@ znajdują się tutaj:
 - part_physics.py - pliki źródłowe od symulacji fizyki
 - generate_real_depth_thread.py - post-processing obrazów głębi
 
-## 5 Przykładowe uruchomienie
+## 5 Przed uruchomieniem
 Przed uruchomieniem konieczne jest dostosowanie ścieżek w pliku dataset_generator/optimalized_generator/config.yaml:
 - main_folder - ścieżka do folderu, gdzie pobrano repozytorium
 - datasets - rozpakowane foldery zbioru danych scen, obiektów, tekstur
 - output - lokalizacja wyników działania generatora (main_folder/output)
 
+Wartu również upewnić się czy Blender na pewno uruchomi render przy wykorzystaniu OPTIX (wymaga GPU Nvidi serii RTX). \
+W otwartym blenderze (ręcznie lub przez debug) sprawdzić wybranie opcji OPTIX w "Edit/Preferences/System/Cycles Render Devices"
 
+
+## 6 Przykładowe uruchomienie
 Pełne działanie generatora wraz z post-processingiem zdjęć głębi
 <pre>
 blenderproc run generate_data_v3.py --seed 42 --num_samples 5 --num_repeats 3 --config config.yaml --physics --post-process 4
@@ -60,3 +64,6 @@ Otworzy się okno Blendera i trzeba w nim ręcznie uruchomić skrypt przez przyc
 <pre>
 blenderproc debug generate_data_v3.py --seed 42 --num_samples 1 --num_repeats 1 --config config.yaml --debug
 </pre>
+
+!INFO
+W przypadku kadrów zawierających obiekty na tle szarej "pustki" blendera w niezabudowanych scenach, na zdjęciach głębi mogą występować "bloby". Zdjęcia te i tak nie są przydatrne przez zbyt duży jednolity kolor szarości na obrazach RGB.

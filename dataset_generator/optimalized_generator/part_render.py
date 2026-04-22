@@ -3,6 +3,7 @@ import bpy
 # Importy blenderproc/bpy musza byc na poczatku skryptu
 
 import math
+import os
 import numpy as np
 
 import mathutils
@@ -450,7 +451,7 @@ def render_rgb_pass(depth_cam, rgb_cam, cam_params: dict, output_dir: str, poses
 		if np.issubdtype(rgb_img.dtype, np.floating):
 			rgb_img = np.clip(rgb_img, 0.0, 1.0) * 255.0
 		rgb_img = rgb_img.astype(np.uint8)
-		out_path = f"{output_dir}/rgb_{i}.png"
+		out_path = os.path.join(output_dir, f"rgb_{i}.png")
 		cv2.imwrite(out_path, cv2.cvtColor(rgb_img, cv2.COLOR_RGB2BGR))
 
 
@@ -482,6 +483,12 @@ def render_depth_pass(depth_cam, rgb_cam, cam_params: dict, output_dir: str, pos
 	if depth_maps is None:
 		depth_maps = data.get("distance", [])
 
+	if len(depth_maps) != len(poses):
+		raise RuntimeError(
+			f"Depth render returned {len(depth_maps)} maps for {len(poses)} poses. "
+			"Aborting to avoid inconsistent or corrupted depth outputs."
+		)
+
 	missing = []
 	for i, depth_m in enumerate(depth_maps):
 		try:
@@ -490,7 +497,7 @@ def render_depth_pass(depth_cam, rgb_cam, cam_params: dict, output_dir: str, pos
 			depth_m[depth_m > 10.0] = 0.0
 			depth_m[depth_m < 0.0] = 0.0
 			depth_mm = np.clip(depth_m * 1000.0, 0, 65535).astype(np.uint16)
-			png_path = f"{output_dir}/depth_{i}.png"
+			png_path = os.path.join(output_dir, f"depth_{i}.png")
 			if not cv2.imwrite(png_path, depth_mm):
 				missing.append(f"depth_{i}.png")
 		except Exception:

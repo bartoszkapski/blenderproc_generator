@@ -1,0 +1,7 @@
+rendered/
+img/
+output/
+.vscode/
+.venv/
+venv/
+**/__pycache__
