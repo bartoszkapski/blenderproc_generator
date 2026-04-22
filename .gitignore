@@ -9,3 +9,5 @@ dataset_generator/orchestrator.py
 dataset_generator/optimalized_generator/output/
 dataset_generator/optimalized_generator/__pycache__/
 dataset_generator/optimalized_generator/examples/
+dataset_generator/optimalized_generator_copy
+inne_wersje/
